@@ -1,4 +1,4 @@
-name: 'Kustomize Smart Deploy'
+name: 'Skyhook Kustomize Smart Deploy'
 description: 'Complete kustomize deployment with GitOps detection and metadata extraction'
 author: 'Skyhook'
 
