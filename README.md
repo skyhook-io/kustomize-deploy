@@ -1,7 +1,7 @@
 # Kustomize Deploy
 
 High-level deployment action that handles both GitOps (ArgoCD) and direct kubectl deployments with automatic detection.
-
+ 
 ## Features
 
 - 🔍 **Auto-detects GitOps** - Checks for ArgoCD management
