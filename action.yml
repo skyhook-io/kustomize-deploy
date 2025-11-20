@@ -171,14 +171,11 @@ runs:
     # GitOps path: commit changes
     - name: Commit changes for GitOps
       if: ${{ steps.mode.outputs.mode == 'gitops' }}
-      uses: stefanzweifel/git-auto-commit-action@v5
+      uses: skyhook-io/git-sync-commit@v1
       with:
-        repository: ${{ inputs.working_directory }}
-        commit_message: |
-          ${{ inputs.commit_message || format('Deploy {0} to {1} [skip ci]', inputs.service_name, inputs.environment) }}
-        file_pattern: '${{ inputs.overlay_dir }}/*'
-        commit_user_name: GitHub Actions Bot
-        commit_user_email: actions@github.com
+        path: ${{ inputs.working_directory }}
+        commit_message: ${{ inputs.commit_message || format('Deploy {0} to {1} [skip ci]', inputs.service_name, inputs.environment) }}
+        file_pattern: ${{ inputs.overlay_dir }}/*
     
     # Kubectl path: direct apply
     - name: Apply with kubectl
