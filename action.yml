@@ -136,9 +136,10 @@ runs:
 
         if [ -n "$IMAGE" ]; then
           # Parse image — may contain tag after colon
-          if [[ "$IMAGE" == *:* ]]; then
-            CURRENT_NAME="${IMAGE%%:*}"
-            VERSION="${IMAGE##*:}"
+          # Use regex where tag = last colon-segment with no slash (handles registry ports like host:5000/app:v1)
+          if [[ "$IMAGE" =~ ^(.+):([^/]+)$ ]]; then
+            CURRENT_NAME="${BASH_REMATCH[1]}"
+            VERSION="${BASH_REMATCH[2]}"
           else
             CURRENT_NAME="$IMAGE"
             VERSION="$TAG"
