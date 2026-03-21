@@ -29,7 +29,7 @@ inputs:
   ensure_service_image:
     description: 'Ensure an image entry for service_name:version is included (adds it if missing)'
     required: false
-    default: 'true'
+    default: 'false'
   environment:
     description: 'Environment name'
     required: true
@@ -123,12 +123,16 @@ runs:
           # images_json mode: check if service_name already present
           if echo "$IMAGES_JSON" | jq -e --arg svc "$SERVICE_NAME" '.[] | select(.name == $svc)' > /dev/null 2>&1; then
             echo "✓ service_name '$SERVICE_NAME' already in images_json"
+            echo "image=" >> $GITHUB_OUTPUT
+            echo "tag=" >> $GITHUB_OUTPUT
             echo "images_json=$IMAGES_JSON" >> $GITHUB_OUTPUT
             exit 0
           fi
           # Not present — append service_name entry using version from first entry
           VERSION=$(echo "$IMAGES_JSON" | jq -r '.[0].newTag')
           IMAGES_JSON=$(echo "$IMAGES_JSON" | jq -c --arg svc "$SERVICE_NAME" --arg ver "$VERSION" '. + [{"name": $svc, "newTag": $ver}]')
+          echo "image=" >> $GITHUB_OUTPUT
+          echo "tag=" >> $GITHUB_OUTPUT
           echo "images_json=$IMAGES_JSON" >> $GITHUB_OUTPUT
           echo "✓ Appended service_name '$SERVICE_NAME' with tag '$VERSION' to images_json"
           exit 0
@@ -150,6 +154,7 @@ runs:
             echo "✓ Image already matches service_name"
             echo "image=$IMAGE" >> $GITHUB_OUTPUT
             echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "images_json=" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -159,6 +164,8 @@ runs:
             --arg svc "$SERVICE_NAME" \
             --arg ver "$VERSION" \
             '[{"name": $orig, "newTag": $ver}, {"name": $svc, "newTag": $ver}]')
+          echo "image=" >> $GITHUB_OUTPUT
+          echo "tag=" >> $GITHUB_OUTPUT
           echo "images_json=$IMAGES_JSON" >> $GITHUB_OUTPUT
           echo "✓ Converted to images_json with both '$CURRENT_NAME' and '$SERVICE_NAME' at tag '$VERSION'"
           exit 0
