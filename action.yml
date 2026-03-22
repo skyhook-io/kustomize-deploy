@@ -128,8 +128,12 @@ runs:
             echo "images_json=$IMAGES_JSON" >> $GITHUB_OUTPUT
             exit 0
           fi
-          # Not present — append service_name entry using version from first entry
-          VERSION=$(echo "$IMAGES_JSON" | jq -r '.[0].newTag')
+          # Not present — append service_name entry; prefer explicit tag input, fall back to first entry's tag
+          if [ -n "$TAG" ]; then
+            VERSION="$TAG"
+          else
+            VERSION=$(echo "$IMAGES_JSON" | jq -r '.[0].newTag')
+          fi
           IMAGES_JSON=$(echo "$IMAGES_JSON" | jq -c --arg svc "$SERVICE_NAME" --arg ver "$VERSION" '. + [{"name": $svc, "newTag": $ver}]')
           echo "image=" >> $GITHUB_OUTPUT
           echo "tag=" >> $GITHUB_OUTPUT
@@ -176,8 +180,12 @@ runs:
           KUSTOMIZATION="${{ inputs.working_directory }}/${{ inputs.overlay_dir }}/kustomization.yaml"
           # Check if kustomization.yaml has an existing newName for this service_name
           EXISTING_NEW_NAME=""
-          if [ -f "$KUSTOMIZATION" ] && command -v yq >/dev/null 2>&1; then
-            EXISTING_NEW_NAME=$(yq ".images[] | select(.name == \"$SERVICE_NAME\") | .newName // \"\"" "$KUSTOMIZATION" 2>/dev/null || echo "")
+          if [ -f "$KUSTOMIZATION" ]; then
+            if command -v yq >/dev/null 2>&1; then
+              EXISTING_NEW_NAME=$(yq ".images[] | select(.name == \"$SERVICE_NAME\") | .newName // \"\"" "$KUSTOMIZATION" 2>/dev/null || echo "")
+            else
+              echo "::warning::yq not found — cannot check for existing newName in kustomization.yaml"
+            fi
           fi
 
           if [ -n "$EXISTING_NEW_NAME" ]; then
