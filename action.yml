@@ -26,6 +26,10 @@ inputs:
   images_json:
     description: 'Multiple images as JSON array: [{"name":"registry.io/app","newTag":"v1.2.3"}]'
     required: false
+  ensure_service_image:
+    description: 'Ensure an image entry for service_name:version is included (adds it if missing)'
+    required: false
+    default: 'true'
   environment:
     description: 'Environment name'
     required: true
@@ -93,13 +97,130 @@ runs:
           exit 1
         fi
 
+    - name: Ensure service image
+      id: images
+      shell: bash
+      run: |
+        IMAGE="${{ inputs.image }}"
+        TAG="${{ inputs.tag }}"
+        IMAGES_JSON='${{ inputs.images_json }}'
+        SERVICE_NAME="${{ inputs.service_name }}"
+        ENSURE="${{ inputs.ensure_service_image }}"
+
+        # If flag is not true, pass through unchanged
+        if [ "$ENSURE" != "true" ]; then
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "images_json=$IMAGES_JSON" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        # Parse current image name and version from inputs
+        CURRENT_NAME=""
+        VERSION=""
+
+        if [ -n "$IMAGES_JSON" ]; then
+          # images_json mode: check if service_name already present
+          if echo "$IMAGES_JSON" | jq -e --arg svc "$SERVICE_NAME" '.[] | select(.name == $svc)' > /dev/null 2>&1; then
+            echo "✓ service_name '$SERVICE_NAME' already in images_json"
+            echo "image=" >> $GITHUB_OUTPUT
+            echo "tag=" >> $GITHUB_OUTPUT
+            echo "images_json=$IMAGES_JSON" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          # Not present — append service_name entry; prefer explicit tag input, fall back to first entry's tag
+          if [ -n "$TAG" ]; then
+            VERSION="$TAG"
+          else
+            VERSION=$(echo "$IMAGES_JSON" | jq -r '.[0].newTag')
+          fi
+          IMAGES_JSON=$(echo "$IMAGES_JSON" | jq -c --arg svc "$SERVICE_NAME" --arg ver "$VERSION" '. + [{"name": $svc, "newTag": $ver}]')
+          echo "image=" >> $GITHUB_OUTPUT
+          echo "tag=" >> $GITHUB_OUTPUT
+          echo "images_json=$IMAGES_JSON" >> $GITHUB_OUTPUT
+          echo "✓ Appended service_name '$SERVICE_NAME' with tag '$VERSION' to images_json"
+          exit 0
+        fi
+
+        if [ -n "$IMAGE" ]; then
+          # Parse image — may contain tag after colon
+          # Use regex where tag = last colon-segment with no slash (handles registry ports like host:5000/app:v1)
+          if [[ "$IMAGE" =~ ^(.+):([^/]+)$ ]]; then
+            CURRENT_NAME="${BASH_REMATCH[1]}"
+            VERSION="${BASH_REMATCH[2]}"
+          else
+            CURRENT_NAME="$IMAGE"
+            VERSION="$TAG"
+          fi
+
+          # If image name already matches service_name, no change needed
+          if [ "$CURRENT_NAME" = "$SERVICE_NAME" ]; then
+            echo "✓ Image already matches service_name"
+            echo "image=$IMAGE" >> $GITHUB_OUTPUT
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "images_json=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Convert to images_json with both original and service_name
+          IMAGES_JSON=$(jq -n -c \
+            --arg orig "$CURRENT_NAME" \
+            --arg svc "$SERVICE_NAME" \
+            --arg ver "$VERSION" \
+            '[{"name": $orig, "newTag": $ver}, {"name": $svc, "newTag": $ver}]')
+          echo "image=" >> $GITHUB_OUTPUT
+          echo "tag=" >> $GITHUB_OUTPUT
+          echo "images_json=$IMAGES_JSON" >> $GITHUB_OUTPUT
+          echo "✓ Converted to images_json with both '$CURRENT_NAME' and '$SERVICE_NAME' at tag '$VERSION'"
+          exit 0
+        fi
+
+        # No image/images_json provided — if tag exists, use service_name as image
+        if [ -n "$TAG" ]; then
+          KUSTOMIZATION="${{ inputs.working_directory }}/${{ inputs.overlay_dir }}/kustomization.yaml"
+          # Check if kustomization.yaml has an existing newName for this service_name
+          EXISTING_NEW_NAME=""
+          if [ -f "$KUSTOMIZATION" ]; then
+            if command -v yq >/dev/null 2>&1; then
+              EXISTING_NEW_NAME=$(yq ".images[] | select(.name == \"$SERVICE_NAME\") | .newName // \"\"" "$KUSTOMIZATION" 2>/dev/null || echo "")
+            else
+              echo "::warning::yq not found — cannot check for existing newName in kustomization.yaml"
+            fi
+          fi
+
+          if [ -n "$EXISTING_NEW_NAME" ]; then
+            # Preserve the existing newName mapping
+            IMAGES_JSON=$(jq -n -c \
+              --arg svc "$SERVICE_NAME" \
+              --arg newName "$EXISTING_NEW_NAME" \
+              --arg ver "$TAG" \
+              '[{"name": $svc, "newName": $newName, "newTag": $ver}]')
+            echo "✓ Created images_json from service_name '$SERVICE_NAME' with existing newName '$EXISTING_NEW_NAME' and tag '$TAG'"
+          else
+            IMAGES_JSON=$(jq -n -c \
+              --arg svc "$SERVICE_NAME" \
+              --arg ver "$TAG" \
+              '[{"name": $svc, "newTag": $ver}]')
+            echo "✓ Created images_json from service_name '$SERVICE_NAME' with tag '$TAG'"
+          fi
+          echo "image=" >> $GITHUB_OUTPUT
+          echo "tag=" >> $GITHUB_OUTPUT
+          echo "images_json=$IMAGES_JSON" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        # Nothing to do — pass through
+        echo "image=$IMAGE" >> $GITHUB_OUTPUT
+        echo "tag=$TAG" >> $GITHUB_OUTPUT
+        echo "images_json=$IMAGES_JSON" >> $GITHUB_OUTPUT
+
     - name: Update kustomize manifests
       uses: skyhook-io/kustomize-edit@v1
       with:
         overlay_dir: ${{ inputs.working_directory }}/${{ inputs.overlay_dir }}
-        image: ${{ inputs.image }}
-        tag: ${{ inputs.tag }}
-        images_json: ${{ inputs.images_json }}
+        image: ${{ steps.images.outputs.image }}
+        tag: ${{ steps.images.outputs.tag }}
+        images_json: ${{ steps.images.outputs.images_json }}
         version_label: ${{ inputs.tag }}
         annotations: |
           last-deployed-by=${{ inputs.actor || github.actor }}
