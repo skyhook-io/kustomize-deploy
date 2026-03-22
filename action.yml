@@ -173,14 +173,31 @@ runs:
 
         # No image/images_json provided — if tag exists, use service_name as image
         if [ -n "$TAG" ]; then
-          IMAGES_JSON=$(jq -n -c \
-            --arg svc "$SERVICE_NAME" \
-            --arg ver "$TAG" \
-            '[{"name": $svc, "newTag": $ver}]')
+          KUSTOMIZATION="${{ inputs.working_directory }}/${{ inputs.overlay_dir }}/kustomization.yaml"
+          # Check if kustomization.yaml has an existing newName for this service_name
+          EXISTING_NEW_NAME=""
+          if [ -f "$KUSTOMIZATION" ] && command -v yq >/dev/null 2>&1; then
+            EXISTING_NEW_NAME=$(yq ".images[] | select(.name == \"$SERVICE_NAME\") | .newName // \"\"" "$KUSTOMIZATION" 2>/dev/null || echo "")
+          fi
+
+          if [ -n "$EXISTING_NEW_NAME" ]; then
+            # Preserve the existing newName mapping
+            IMAGES_JSON=$(jq -n -c \
+              --arg svc "$SERVICE_NAME" \
+              --arg newName "$EXISTING_NEW_NAME" \
+              --arg ver "$TAG" \
+              '[{"name": $svc, "newName": $newName, "newTag": $ver}]')
+            echo "✓ Created images_json from service_name '$SERVICE_NAME' with existing newName '$EXISTING_NEW_NAME' and tag '$TAG'"
+          else
+            IMAGES_JSON=$(jq -n -c \
+              --arg svc "$SERVICE_NAME" \
+              --arg ver "$TAG" \
+              '[{"name": $svc, "newTag": $ver}]')
+            echo "✓ Created images_json from service_name '$SERVICE_NAME' with tag '$TAG'"
+          fi
           echo "image=" >> $GITHUB_OUTPUT
           echo "tag=" >> $GITHUB_OUTPUT
           echo "images_json=$IMAGES_JSON" >> $GITHUB_OUTPUT
-          echo "✓ Created images_json from service_name '$SERVICE_NAME' with tag '$TAG'"
           exit 0
         fi
 
