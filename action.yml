@@ -171,7 +171,20 @@ runs:
           exit 0
         fi
 
-        # No image inputs provided — pass through
+        # No image/images_json provided — if tag exists, use service_name as image
+        if [ -n "$TAG" ]; then
+          IMAGES_JSON=$(jq -n -c \
+            --arg svc "$SERVICE_NAME" \
+            --arg ver "$TAG" \
+            '[{"name": $svc, "newTag": $ver}]')
+          echo "image=" >> $GITHUB_OUTPUT
+          echo "tag=" >> $GITHUB_OUTPUT
+          echo "images_json=$IMAGES_JSON" >> $GITHUB_OUTPUT
+          echo "✓ Created images_json from service_name '$SERVICE_NAME' with tag '$TAG'"
+          exit 0
+        fi
+
+        # Nothing to do — pass through
         echo "image=$IMAGE" >> $GITHUB_OUTPUT
         echo "tag=$TAG" >> $GITHUB_OUTPUT
         echo "images_json=$IMAGES_JSON" >> $GITHUB_OUTPUT
