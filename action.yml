@@ -29,7 +29,7 @@ inputs:
   ensure_service_image:
     description: 'Ensure an image entry for service_name:version is included (adds it if missing)'
     required: false
-    default: 'true'
+    default: 'false'
   environment:
     description: 'Environment name'
     required: true
