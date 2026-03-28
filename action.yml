@@ -242,21 +242,43 @@ runs:
       working-directory: ${{ inputs.working_directory }}/${{ inputs.overlay_dir }}
       run: |
         echo "Detecting deployment mode..."
-        
-        BUILD_RESULT=$(kustomize build)
-        MANAGED_BY=$(echo "$BUILD_RESULT" | grep "app.kubernetes.io/managed-by:" | head -n1 | sed 's/.*app.kubernetes.io\/managed-by:\s*//' | tr -d '[:space:]' || true)
-        
-        echo "managed_by=$MANAGED_BY" >> $GITHUB_OUTPUT
-        
-        if [ "$MANAGED_BY" = "argocd" ]; then
+
+        # Primary detection: check for ArgoCD Application YAML file (single source of truth)
+        # Overlay dir is e.g. deploy/overlays/nurture-prod, ArgoCD dir is deploy/argocd/
+        ARGOCD_DIR="../../argocd"
+        ARGOCD_FILE="${ARGOCD_DIR}/${{ inputs.environment }}.yaml"
+        ARGOCD_FILE_YML="${ARGOCD_DIR}/${{ inputs.environment }}.yml"
+
+        echo "Checking for ArgoCD Application YAML at: $(cd "$ARGOCD_DIR" 2>/dev/null && pwd || echo "$ARGOCD_DIR [not found]")/${{ inputs.environment }}.yaml"
+
+        if [ -f "$ARGOCD_FILE" ] || [ -f "$ARGOCD_FILE_YML" ]; then
+          echo "managed_by=argocd" >> $GITHUB_OUTPUT
           echo "mode=gitops" >> $GITHUB_OUTPUT
-          echo "✓ GitOps mode detected (ArgoCD)"
-        elif [ "$MANAGED_BY" = "flux" ]; then
-          echo "mode=gitops" >> $GITHUB_OUTPUT
-          echo "✓ GitOps mode detected (Flux)"
+          echo "✓ GitOps mode detected (ArgoCD Application YAML found)"
         else
-          echo "mode=kubectl" >> $GITHUB_OUTPUT
-          echo "✓ Direct deployment mode (kubectl)"
+          echo "::notice::ArgoCD Application YAML not found. Falling back to kustomize build label detection."
+          # Fallback: check managed-by label in kustomize build output for backwards compatibility
+          if ! BUILD_RESULT=$(kustomize build 2>&1); then
+            echo "::warning::kustomize build failed during GitOps detection. Defaulting to kubectl mode."
+            echo "::warning::Build error: $BUILD_RESULT"
+            echo "managed_by=" >> $GITHUB_OUTPUT
+            echo "mode=kubectl" >> $GITHUB_OUTPUT
+          else
+            MANAGED_BY=$(echo "$BUILD_RESULT" | { grep "app.kubernetes.io/managed-by:" || true; } | head -n1 | sed 's/.*app.kubernetes.io\/managed-by:\s*//' | tr -d '[:space:]')
+
+            echo "managed_by=$MANAGED_BY" >> $GITHUB_OUTPUT
+
+            if [ "$MANAGED_BY" = "argocd" ]; then
+              echo "mode=gitops" >> $GITHUB_OUTPUT
+              echo "✓ GitOps mode detected (ArgoCD, via managed-by label fallback)"
+            elif [ "$MANAGED_BY" = "flux" ]; then
+              echo "mode=gitops" >> $GITHUB_OUTPUT
+              echo "✓ GitOps mode detected (Flux)"
+            else
+              echo "mode=kubectl" >> $GITHUB_OUTPUT
+              echo "✓ Direct deployment mode (kubectl)"
+            fi
+          fi
         fi
     
     - name: Set deployment mode
