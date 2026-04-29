@@ -242,15 +242,31 @@ runs:
       working-directory: ${{ inputs.working_directory }}/${{ inputs.overlay_dir }}
       run: |
         echo "Detecting deployment mode..."
-        
+
+        # 1) Skyhook layout first: deploy/overlays/<env> -> ../../argocd/<env>.yaml
+        ENV="${{ inputs.environment }}"
+        ARGOCD_APP_YAML="../../argocd/${ENV}.yaml"
+        ARGOCD_APP_YML="../../argocd/${ENV}.yml"
+        if [ -f "$ARGOCD_APP_YAML" ] || [ -f "$ARGOCD_APP_YML" ]; then
+          if [ -f "$ARGOCD_APP_YAML" ]; then
+            echo "✓ Found Argo CD Application manifest: $ARGOCD_APP_YAML"
+          else
+            echo "✓ Found Argo CD Application manifest: $ARGOCD_APP_YML"
+          fi
+          echo "managed_by=" >> $GITHUB_OUTPUT
+          echo "mode=gitops" >> $GITHUB_OUTPUT
+          echo "✓ GitOps mode (deploy/argocd/${ENV}.yaml)"
+          exit 0
+        fi
+
+        # 2) Fall back to built manifests (app.kubernetes.io/managed-by)
         BUILD_RESULT=$(kustomize build)
         MANAGED_BY=$(echo "$BUILD_RESULT" | grep "app.kubernetes.io/managed-by:" | head -n1 | sed 's/.*app.kubernetes.io\/managed-by:\s*//' | tr -d '[:space:]' || true)
-        
         echo "managed_by=$MANAGED_BY" >> $GITHUB_OUTPUT
-        
+
         if [ "$MANAGED_BY" = "argocd" ]; then
           echo "mode=gitops" >> $GITHUB_OUTPUT
-          echo "✓ GitOps mode detected (ArgoCD)"
+          echo "✓ GitOps mode detected (app.kubernetes.io/managed-by: argocd)"
         elif [ "$MANAGED_BY" = "flux" ]; then
           echo "mode=gitops" >> $GITHUB_OUTPUT
           echo "✓ GitOps mode detected (Flux)"
