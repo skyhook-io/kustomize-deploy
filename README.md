@@ -4,7 +4,7 @@ High-level deployment action that handles both GitOps (ArgoCD) and direct kubect
  
 ## Features
 
-- 🔍 **Auto-detects GitOps** - Checks for ArgoCD management
+- 🔍 **Auto-detects GitOps** — Fixed relative path to `../../argocd/<environment>.yaml|.yml` from the overlay (Skyhook layout), else `managed-by` on built manifests
 - 📝 **Updates manifests** - Sets image tags, labels, and environment variables
 - 🚀 **Dual mode** - GitOps commit or kubectl apply
 - ⏳ **Wait for rollout** - Monitors deployment status
@@ -82,7 +82,7 @@ High-level deployment action that handles both GitOps (ArgoCD) and direct kubect
 | `mode` | Deployment mode used (gitops or kubectl) |
 | `namespace` | Kubernetes namespace |
 | `deployment` | Primary deployment name |
-| `managed_by` | Value of managed-by label if found |
+| `managed_by` | Value of `app.kubernetes.io/managed-by` from `kustomize build` when step 2 runs; **empty** when GitOps is chosen via Skyhook Application file only (step 1) |
 
 ## How It Works
 
@@ -99,10 +99,20 @@ This action acts as an **orchestrator** that delegates to specialized sub-action
 - Validates kustomization builds successfully
 
 ### 3. Detection Phase
-- Detects deployment mode by checking for GitOps labels:
+Auto mode (`force_mode: auto`, `detect_gitops: true`) picks **gitops** vs **kubectl** in order:
+
+1. **Skyhook layout (fixed relative path)** — Detection runs with working directory = `working_directory`/`overlay_dir` (same folder as your overlay `kustomization.yaml`). From there it checks **only**:
+   - `../../argocd/<environment>.yaml` **or**
+   - `../../argocd/<environment>.yml`  
+   `<environment>` is the `environment` input (e.g. `staging`, `production`).  
+   Example: `overlay_dir: deploy/overlays/production` → looks for `deploy/argocd/production.yaml` or `deploy/argocd/production.yml`.  
+   There is **no** extra input to customize this path. If your repo uses a different folder depth or Argo CD manifest location, this check does nothing and detection continues with step 2 (use **`managed-by` labels** or **`force_mode: gitops`**).  
+   When this file exists: mode is **gitops**. The `managed_by` output is **not** set (empty); use **`force_mode`** / downstream logic keyed on **`mode`** if you need explicit handling.
+2. **Otherwise** — inspect built manifests for:
 ```yaml
 app.kubernetes.io/managed-by: argocd  # or flux
 ```
+   If the label is **argocd** or **flux**, mode is **gitops**; else **kubectl**.
 
 ### 4. Deploy Phase
 
@@ -314,6 +324,7 @@ The action will fail if:
 
 ## Notes
 
+- **Skyhook Application path** is not configurable; it must match the layout above or rely on step 2 (`managed-by`) / `force_mode`.
 - Always use with cloud-login action for kubectl mode
 - GitOps mode requires repository write permissions
 - **Image format options:**
