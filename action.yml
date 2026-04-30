@@ -30,6 +30,10 @@ inputs:
     description: 'Ensure an image entry for service_name:version is included (adds it if missing)'
     required: false
     default: 'false'
+  update_all_images:
+    description: 'Apply the provided tag to every image entry in kustomization.yaml. Useful for monorepo releases where all services share a version. Mutually exclusive with image/images_json/ensure_service_image. Requires tag input.'
+    required: false
+    default: 'false'
   environment:
     description: 'Environment name'
     required: true
@@ -97,7 +101,7 @@ runs:
           exit 1
         fi
 
-    - name: Ensure service image
+    - name: Resolve image inputs
       id: images
       shell: bash
       run: |
@@ -106,6 +110,62 @@ runs:
         IMAGES_JSON='${{ inputs.images_json }}'
         SERVICE_NAME="${{ inputs.service_name }}"
         ENSURE="${{ inputs.ensure_service_image }}"
+        UPDATE_ALL="${{ inputs.update_all_images }}"
+
+        # update_all_images: rewrite newTag on every entry in kustomization.yaml's images[]
+        if [ "$UPDATE_ALL" = "true" ]; then
+          KUSTOMIZATION="${{ inputs.working_directory }}/${{ inputs.overlay_dir }}/kustomization.yaml"
+
+          # Mutually exclusive with image/images_json/ensure_service_image
+          CONFLICTS=()
+          [ -n "$IMAGE" ] && CONFLICTS+=("image")
+          [ -n "$IMAGES_JSON" ] && CONFLICTS+=("images_json")
+          [ "$ENSURE" = "true" ] && CONFLICTS+=("ensure_service_image")
+          if [ ${#CONFLICTS[@]} -gt 0 ]; then
+            echo "::error::update_all_images=true is mutually exclusive with: ${CONFLICTS[*]}"
+            exit 1
+          fi
+
+          if [ -z "$TAG" ]; then
+            echo "::error::update_all_images=true requires tag input"
+            exit 1
+          fi
+          if ! command -v yq >/dev/null 2>&1; then
+            echo "::error::update_all_images=true requires yq to read kustomization.yaml"
+            exit 1
+          fi
+          if ! command -v jq >/dev/null 2>&1; then
+            echo "::error::update_all_images=true requires jq"
+            exit 1
+          fi
+          if [ ! -f "$KUSTOMIZATION" ]; then
+            echo "::error::kustomization.yaml not found at $KUSTOMIZATION"
+            exit 1
+          fi
+
+          # Reject digest-pinned entries — rewriting newTag would not take effect and is misleading
+          DIGEST_COUNT=$(yq -o=json '.images // []' "$KUSTOMIZATION" | jq '[.[] | select(.digest)] | length')
+          if [ "$DIGEST_COUNT" -gt 0 ]; then
+            echo "::error::update_all_images=true is incompatible with digest-pinned image entries (found $DIGEST_COUNT in $KUSTOMIZATION). Remove digest pins or use image/images_json instead."
+            exit 1
+          fi
+
+          NEW_IMAGES_JSON=$(yq -o=json '.images // []' "$KUSTOMIZATION" | jq -c \
+            --arg tag "$TAG" \
+            '[.[] | {name: .name} + (if .newName then {newName: .newName} else {} end) + {newTag: $tag}]')
+
+          COUNT=$(echo "$NEW_IMAGES_JSON" | jq 'length')
+          if [ "$COUNT" = "0" ]; then
+            echo "::error::update_all_images=true but kustomization.yaml has no images[] entries"
+            exit 1
+          fi
+
+          echo "image=" >> $GITHUB_OUTPUT
+          echo "tag=" >> $GITHUB_OUTPUT
+          echo "images_json=$NEW_IMAGES_JSON" >> $GITHUB_OUTPUT
+          echo "✓ update_all_images: bumped $COUNT image(s) to '$TAG'"
+          exit 0
+        fi
 
         # If flag is not true, pass through unchanged
         if [ "$ENSURE" != "true" ]; then
