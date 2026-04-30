@@ -60,6 +60,8 @@ High-level deployment action that handles both GitOps (ArgoCD) and direct kubect
 | `image` | Container image name | ❌* | - |
 | `tag` | Image tag | ❌* | - |
 | `images_json` | Multiple images as JSON array | ❌* | - |
+| `ensure_service_image` | Ensure an image entry for `service_name` is included (adds it if missing) | ❌ | `false` |
+| `update_all_images` | Apply `tag` to every image entry in `kustomization.yaml`. Mutually exclusive with `image`/`images_json`/`ensure_service_image`. Requires `tag` | ❌ | `false` |
 | `environment` | Environment name | ✅ | - |
 | `actor` | User deploying | ❌ | `${{ github.actor }}` |
 | `run_id` | Run ID for tracking | ❌ | `${{ github.run_id }}` |
@@ -74,6 +76,7 @@ High-level deployment action that handles both GitOps (ArgoCD) and direct kubect
   - Option 1: `image` (with embedded tag, e.g., `registry.io/app:v1.2.3`)
   - Option 2: `image` + `tag` (separate, e.g., `image: registry.io/app`, `tag: v1.2.3`)
   - Option 3: `images_json` (for multiple images)
+  - Option 4: `tag` + `update_all_images: true` (bump every image entry in `kustomization.yaml` to the same tag - monorepo releases). Mutually exclusive with `image`/`images_json`/`ensure_service_image`.
 
 ## Outputs
 
@@ -225,6 +228,20 @@ app.kubernetes.io/managed-by: argocd  # or flux
       ]
     environment: production
 ```
+
+### Monorepo release: bump every image to the same tag
+```yaml
+- name: Deploy monorepo release
+  uses: skyhook-io/kustomize-deploy@v1
+  with:
+    overlay_dir: deploy/overlays/production
+    service_name: platform
+    tag: v2.3.0
+    update_all_images: true
+    environment: production
+```
+
+When `update_all_images: true`, the action reads `kustomization.yaml`, takes every entry under `images:`, and rewrites its `newTag` to the supplied `tag` (preserving `newName` if set). Errors if `image`, `images_json`, or `ensure_service_image` are also set. Fails fast if `tag` is missing, `kustomization.yaml` has no `images[]`, or any entry uses `digest:`.
 
 ### Real-world example: Service with database migrations
 ```yaml
