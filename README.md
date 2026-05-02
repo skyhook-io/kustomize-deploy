@@ -71,6 +71,7 @@ High-level deployment action that handles both GitOps (ArgoCD) and direct kubect
 | `create_namespace` | Create namespace if it does not exist | ❌ | `true` |
 | `wait_timeout` | Timeout for waiting on deployments (seconds) | ❌ | `120` |
 | `env_patches` | Environment file patches (JSON format) | ❌ | - |
+| `enable_helm` | Pass `--enable-helm` to `kustomize build` (required for overlays using `helmCharts:`). Requires `helm` binary on the runner; fails fast if missing. Set to `false` to skip. | ❌ | `true` |
 
 \* **Image input options** (choose one):
   - Option 1: `image` (with embedded tag, e.g., `registry.io/app:v1.2.3`)
