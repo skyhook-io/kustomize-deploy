@@ -67,6 +67,10 @@ inputs:
   env_patches:
     description: 'Environment file patches (JSON format matching patch-env-files, e.g., {"container.env":{"SENTRY_RELEASE":"v1.2.3"}})'
     required: false
+  enable_helm:
+    description: 'Pass --enable-helm to kustomize build (requires helm binary on runner). When true, fails fast if helm is not installed.'
+    required: false
+    default: 'true'
 
 outputs:
   mode:
@@ -98,6 +102,11 @@ runs:
 
         if [ ! -f "${{ inputs.working_directory }}/${{ inputs.overlay_dir }}/kustomization.yaml" ]; then
           echo "::error::No kustomization.yaml found in overlay directory"
+          exit 1
+        fi
+
+        if [ "${{ inputs.enable_helm }}" = "true" ] && ! command -v helm >/dev/null 2>&1; then
+          echo "::error::enable_helm=true but 'helm' binary not found in PATH. Install helm or set enable_helm=false."
           exit 1
         fi
 
@@ -294,6 +303,7 @@ runs:
       uses: skyhook-io/kustomize-inspect@v1
       with:
         overlay_dir: ${{ inputs.working_directory }}/${{ inputs.overlay_dir }}
+        enable_helm: ${{ inputs.enable_helm }}
     
     - name: Detect GitOps mode
       id: detect
@@ -320,7 +330,11 @@ runs:
         fi
 
         # 2) Fall back to built manifests (app.kubernetes.io/managed-by)
-        BUILD_RESULT=$(kustomize build)
+        KUSTOMIZE_FLAGS=()
+        if [ "${{ inputs.enable_helm }}" = "true" ]; then
+          KUSTOMIZE_FLAGS+=(--enable-helm)
+        fi
+        BUILD_RESULT=$(kustomize build "${KUSTOMIZE_FLAGS[@]}")
         MANAGED_BY=$(echo "$BUILD_RESULT" | grep "app.kubernetes.io/managed-by:" | head -n1 | sed 's/.*app.kubernetes.io\/managed-by:\s*//' | tr -d '[:space:]' || true)
         echo "managed_by=$MANAGED_BY" >> $GITHUB_OUTPUT
 
@@ -359,7 +373,11 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working_directory }}/${{ inputs.overlay_dir }}
       run: |
-        KUSTOMIZE_BUILD_RESULT=$(kustomize build)
+        KUSTOMIZE_FLAGS=()
+        if [ "${{ inputs.enable_helm }}" = "true" ]; then
+          KUSTOMIZE_FLAGS+=(--enable-helm)
+        fi
+        KUSTOMIZE_BUILD_RESULT=$(kustomize build "${KUSTOMIZE_FLAGS[@]}")
         echo "--- Deployment plan summary ---"
         echo "Deployment mode: ${{ steps.mode.outputs.mode }}"
         echo "KUSTOMIZE_BUILD_RESULT=$KUSTOMIZE_BUILD_RESULT"
@@ -384,3 +402,4 @@ runs:
         workloads_json: ${{ steps.inspect.outputs.workloads_json }}
         wait: 'true'
         wait_timeout: ${{ inputs.wait_timeout }}
+        enable_helm: ${{ inputs.enable_helm }}
