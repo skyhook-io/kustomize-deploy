@@ -320,7 +320,16 @@ runs:
         fi
 
         # 2) Fall back to built manifests (app.kubernetes.io/managed-by)
-        BUILD_RESULT=$(kustomize build)
+        # Auto-detect helmCharts; pass --enable-helm only when present.
+        HELM_FLAG=()
+        if command -v yq >/dev/null 2>&1; then
+          if yq -e '.helmCharts // [] | length > 0' kustomization.yaml >/dev/null 2>&1; then
+            HELM_FLAG=(--enable-helm --load-restrictor=LoadRestrictionsNone)
+          fi
+        elif grep -qE '^helmCharts:[[:space:]]*$' kustomization.yaml 2>/dev/null; then
+          HELM_FLAG=(--enable-helm --load-restrictor=LoadRestrictionsNone)
+        fi
+        BUILD_RESULT=$(kustomize build "${HELM_FLAG[@]}")
         MANAGED_BY=$(echo "$BUILD_RESULT" | grep "app.kubernetes.io/managed-by:" | head -n1 | sed 's/.*app.kubernetes.io\/managed-by:\s*//' | tr -d '[:space:]' || true)
         echo "managed_by=$MANAGED_BY" >> $GITHUB_OUTPUT
 
@@ -359,7 +368,16 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working_directory }}/${{ inputs.overlay_dir }}
       run: |
-        KUSTOMIZE_BUILD_RESULT=$(kustomize build)
+        # Auto-detect helmCharts; pass --enable-helm only when present.
+        HELM_FLAG=()
+        if command -v yq >/dev/null 2>&1; then
+          if yq -e '.helmCharts // [] | length > 0' kustomization.yaml >/dev/null 2>&1; then
+            HELM_FLAG=(--enable-helm --load-restrictor=LoadRestrictionsNone)
+          fi
+        elif grep -qE '^helmCharts:[[:space:]]*$' kustomization.yaml 2>/dev/null; then
+          HELM_FLAG=(--enable-helm --load-restrictor=LoadRestrictionsNone)
+        fi
+        KUSTOMIZE_BUILD_RESULT=$(kustomize build "${HELM_FLAG[@]}")
         echo "--- Deployment plan summary ---"
         echo "Deployment mode: ${{ steps.mode.outputs.mode }}"
         echo "KUSTOMIZE_BUILD_RESULT=$KUSTOMIZE_BUILD_RESULT"
