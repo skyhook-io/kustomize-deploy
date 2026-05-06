@@ -324,10 +324,10 @@ runs:
         HELM_FLAG=()
         if command -v yq >/dev/null 2>&1; then
           if yq -e '.helmCharts // [] | length > 0' kustomization.yaml >/dev/null 2>&1; then
-            HELM_FLAG=(--enable-helm)
+            HELM_FLAG=(--enable-helm --load-restrictor=LoadRestrictionsNone)
           fi
         elif grep -qE '^helmCharts:[[:space:]]*$' kustomization.yaml 2>/dev/null; then
-          HELM_FLAG=(--enable-helm)
+          HELM_FLAG=(--enable-helm --load-restrictor=LoadRestrictionsNone)
         fi
         BUILD_RESULT=$(kustomize build "${HELM_FLAG[@]}")
         MANAGED_BY=$(echo "$BUILD_RESULT" | grep "app.kubernetes.io/managed-by:" | head -n1 | sed 's/.*app.kubernetes.io\/managed-by:\s*//' | tr -d '[:space:]' || true)
@@ -372,10 +372,10 @@ runs:
         HELM_FLAG=()
         if command -v yq >/dev/null 2>&1; then
           if yq -e '.helmCharts // [] | length > 0' kustomization.yaml >/dev/null 2>&1; then
-            HELM_FLAG=(--enable-helm)
+            HELM_FLAG=(--enable-helm --load-restrictor=LoadRestrictionsNone)
           fi
         elif grep -qE '^helmCharts:[[:space:]]*$' kustomization.yaml 2>/dev/null; then
-          HELM_FLAG=(--enable-helm)
+          HELM_FLAG=(--enable-helm --load-restrictor=LoadRestrictionsNone)
         fi
         KUSTOMIZE_BUILD_RESULT=$(kustomize build "${HELM_FLAG[@]}")
         echo "--- Deployment plan summary ---"
