@@ -67,6 +67,10 @@ inputs:
   env_patches:
     description: 'Environment file patches (JSON format matching patch-env-files, e.g., {"container.env":{"SENTRY_RELEASE":"v1.2.3"}})'
     required: false
+  dry_run:
+    description: 'If true, render manifests and detect mode but skip the actual deploy (no GitOps commit, no kubectl apply). Useful for rehearsal/preview runs.'
+    required: false
+    default: 'false'
 
 outputs:
   mode:
@@ -385,7 +389,7 @@ runs:
         
     # GitOps path: commit changes
     - name: Commit changes for GitOps
-      if: ${{ steps.mode.outputs.mode == 'gitops' }}
+      if: ${{ steps.mode.outputs.mode == 'gitops' && inputs.dry_run != 'true' }}
       uses: skyhook-io/git-sync-commit@v1
       with:
         path: ${{ inputs.working_directory }}
@@ -394,7 +398,7 @@ runs:
     
     # Kubectl path: direct apply
     - name: Apply with kubectl
-      if: ${{ steps.mode.outputs.mode == 'kubectl' }}
+      if: ${{ steps.mode.outputs.mode == 'kubectl' && inputs.dry_run != 'true' }}
       uses: skyhook-io/kustomize-apply@v1
       with:
         overlay_dir: ${{ inputs.working_directory }}/${{ inputs.overlay_dir }}
@@ -402,3 +406,38 @@ runs:
         workloads_json: ${{ steps.inspect.outputs.workloads_json }}
         wait: 'true'
         wait_timeout: ${{ inputs.wait_timeout }}
+
+    # Dry-run path: log which terminal step was skipped and the inputs it would have received.
+    # Values are passed via env: rather than ${{ }} interpolation into the shell so untrusted
+    # input like commit_message cannot break out of the echo (GH Actions script injection).
+    - name: Dry-run notice
+      if: ${{ inputs.dry_run == 'true' }}
+      shell: bash
+      env:
+        MODE: ${{ steps.mode.outputs.mode }}
+        WORKING_DIRECTORY: ${{ inputs.working_directory }}
+        OVERLAY_DIR: ${{ inputs.overlay_dir }}
+        COMMIT_MESSAGE: ${{ inputs.commit_message || format('Deploy {0} to {1} [skip ci]', inputs.service_name, inputs.environment) }}
+        NAMESPACE: ${{ steps.inspect.outputs.namespace }}
+        WORKLOADS_JSON: ${{ steps.inspect.outputs.workloads_json }}
+        WAIT_TIMEOUT: ${{ inputs.wait_timeout }}
+      run: |
+        echo "=================================================="
+        echo "🔍 DRY RUN - deploy step skipped"
+        echo "=================================================="
+        if [ "$MODE" = "gitops" ]; then
+          echo "Skipped: Commit changes for GitOps (skyhook-io/git-sync-commit@v1)"
+          echo "  path: $WORKING_DIRECTORY"
+          echo "  commit_message: $COMMIT_MESSAGE"
+          echo "  file_pattern: $OVERLAY_DIR/*"
+        elif [ "$MODE" = "kubectl" ]; then
+          echo "Skipped: Apply with kubectl (skyhook-io/kustomize-apply@v1)"
+          echo "  overlay_dir: $WORKING_DIRECTORY/$OVERLAY_DIR"
+          echo "  namespace: $NAMESPACE"
+          echo "  workloads_json: $WORKLOADS_JSON"
+          echo "  wait: true"
+          echo "  wait_timeout: $WAIT_TIMEOUT"
+        else
+          echo "Skipped: deploy step (mode=$MODE)"
+        fi
+        echo "=================================================="
